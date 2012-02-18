@@ -1,0 +1,208 @@
+﻿integer AVATAR = -5;
+integer PATROLPLANNER = -5;
+integer ROUTERANGER_A = -5;
+integer ROUTERANGER_W = -5;
+integer AI = -5;
+integer MOTOR = -5;
+integer LEFTBUMPER = -5;
+integer RIGHTBUMPER = -5;
+integer MIDDLEBUMPER = -5;
+
+integer pTargetID;
+integer rTargetID;
+vector move_to;
+vector move_to_global;
+float MAX_SPEED = 7.0;
+float MIN_SPEED = 0.1;
+float POSITION_TOLERANCE = 2.0;
+list display = [];
+float last_rot;
+
+
+integer initialize()
+{
+    display = ["INIT",0.0,0.0];
+    llSetText(llDumpList2String(display, "\n"), «1,0,0», 1);
+    pTargetID = 0;
+    rTargetID = 0;
+    last_rot = 0.0;
+    llSetStatus(STATUS_PHYSICS, TRUE);
+    llSetStatus(STATUS_ROTATE_X, TRUE);
+    llSetStatus(STATUS_ROTATE_Z, TRUE);
+    llSetStatus(STATUS_ROTATE_Y, TRUE);
+    llLookAt(«0.0,0.0,10.0», 1.0, 1.0);
+    return 1;
+}
+
+integer finalize()
+{
+    llSetText("Motor hibernating", «1,0,0», 1);
+    llStopMoveToTarget();
+    llStopLookAt();
+    llRotTargetRemove(rTargetID);
+    llTargetRemove(pTargetID);
+    llStopLookAt();
+    return 1;
+}
+
+
+smoothMove(vector newPos, float velPeak, float velMin)
+{
+    float posDiff = llVecMag(newPos - llGetRootPosition());
+    float velMag = llFabs(llVecMag(llGetVel()));
+    float velMultiplier = posDiff * velMag;
+    if(velMultiplier » velPeak) velMultiplier = velPeak;
+    if(velMultiplier « velMin) velMultiplier = velMin;
+    display = llListReplaceList(display, [velMag], 1, 1);
+    llSetText(llDumpList2String(display, "\n"), «1,0,0», 1);
+    vector newVel = velMultiplier * «1.0,0.0,0.0»;
+    vector curVel = llGetVel();
+    rotation rot = llGetRootRotation();
+        // Un-rotate curVel.
+    curVel /= rot;
+    newVel -= curVel;
+    newVel *= llGetMass();
+    llApplyImpulse(newVel,TRUE);
+}
+
+default
+{
+    state_entry()
+    {
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY);
+        llSetTimerEvent(0.5);
+    }             
+    
+    on_rez(integer sp)
+    {
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY);
+        llSetTimerEvent(0.5);
+    }
+    
+    link_message(integer sender, integer num, string str, key id)
+    {
+        if(str == "AVATAR") AVATAR = num;
+        if(str == "ROUTERANGER_A") ROUTERANGER_A = num;
+        if(str == "ROUTERANGER_W") ROUTERANGER_W = num;
+        if(str == "PATROLPLANNER") PATROLPLANNER = num;
+        if(str == "AI") AI = num;
+        if(str == "MOTOR") MOTOR = num;
+        if(str == "LEFTBUMPER") LEFTBUMPER = num;
+        if(str == "RIGHTBUMPER") RIGHTBUMPER = num;
+        if(str == "MIDDLEBUMPER") MIDDLEBUMPER = num;
+    }
+
+    timer()
+    {
+        llMessageLinked(LINK_SET, llGetLinkNumber(), "MOTOR", NULL_KEY);
+        if((AVATAR != -5)
+            &&(ROUTERANGER_A != -5)
+            &&(ROUTERANGER_W != -5)
+                &&(PATROLPLANNER != -5)
+                    &&(AI != -5)
+                        &&(MOTOR != -5)
+                            &&(LEFTBUMPER != -5)
+                                &&(RIGHTBUMPER != -5)
+                                    &&(MIDDLEBUMPER != -5))
+                                    {
+                                        state motor;
+                                    }
+    }
+
+    state_exit()
+    {
+        llSetTimerEvent(0.0);
+    }
+}
+
+
+state motor
+{
+    state_entry()
+    {
+        initialize();
+    }
+    
+    on_rez(integer sp)
+    {
+        state default;
+    }
+
+    link_message(integer sender, integer num, string str, key id)
+    {
+            // Turn (turn to rotation) and move
+        if(num == 3)
+        {
+            list move_data = llParseString2List(str, [";"], []);
+            float this_rot = llList2Float(move_data, 1);
+            display = llListReplaceList(display, [this_rot], 2, 2);
+            rotation rot_to_target = llEuler2Rot(«0.0,0.0,this_rot»);
+            if((this_rot « (last_rot - (5.0 * DEG_TO_RAD))) || (this_rot » (last_rot + (5.0 * DEG_TO_RAD))))
+            {
+                display = llListReplaceList(display, ["Receiving"], 0, 0);
+                llSetText(llDumpList2String(display, "\n"), «1,1,0», 1);
+                rTargetID = llRotTarget(rot_to_target, (5.0 * DEG_TO_RAD));
+                    //Rot to target and save identifier
+                llRotLookAt(rot_to_target, 0.35, 0.5);
+            }
+            else
+            {
+                display = llListReplaceList(display, ["Rotation within ^ of error"], 0, 0);
+                llSetText(llDumpList2String(display, "\n"), «1,0,0», 1);
+            }
+            move_to = «(float)llList2Float(move_data, 0),0.0,0.0»;
+            move_to_global = move_to * llGetRootRotation() + llGetRootPosition();
+            last_rot = this_rot;
+        }
+        else if(num == -999) llResetScript();
+    }
+
+
+    not_at_rot_target()
+    {
+            //display = llListReplaceList(display, ["Rotating"], 0, 0);
+            //llSetText(llDumpList2String(display, "\n"), «1,0,0», 1);
+    }
+
+
+    at_rot_target(integer tnum, rotation targetrot, rotation ourrot)
+    {
+        display = llListReplaceList(display, ["Aimed"], 0, 0);
+        llSetText(llDumpList2String(display, "\n"), «0,1,0», 1);
+        llRotTargetRemove(rTargetID);
+        llApplyImpulse(-llGetVel() * llGetMass(), FALSE);
+        if(llFabs(llVecMag(move_to)) » POSITION_TOLERANCE)
+        {
+            pTargetID = llTarget(move_to_global, POSITION_TOLERANCE); //Move to target and save identifier
+            smoothMove(move_to_global, 3.0, 1.0);
+        }
+    }
+
+
+    not_at_target()
+    {
+        display = llListReplaceList(display, ["Moving"], 0, 0);
+        llSetText(llDumpList2String(display, "\n"), «1,1,0», 1);
+        vector target_offset = move_to_global - llGetRootPosition();
+        rotation target_rot_offset = llEuler2Rot(«0.0,0.0,llAtan2(target_offset.y, target_offset.x)»);
+            //llRotLookAt(target_rot_offset, 0.35, 0.5);
+        smoothMove(move_to_global, MAX_SPEED, MIN_SPEED);
+            //Adjust target tolerance so that the droid can stop within one second and not hit target BPJ 2-10-09
+        llTargetRemove(pTargetID);
+        pTargetID = llTarget(move_to_global, llVecMag(llGetVel()) + POSITION_TOLERANCE);
+    }
+
+
+    at_target(integer tnum, vector targetpos, vector ourpos)
+    {
+        display = llListReplaceList(display, ["Target"], 0, 0);
+        llSetText(llDumpList2String(display, "\n"), «1,1,1», 1);
+        llTargetRemove(pTargetID);
+        llApplyImpulse(-llGetVel() * llGetMass(), FALSE);
+    }
+
+    state_exit()
+    {
+        finalize();
+    }
+}

@@ -1,0 +1,137 @@
+﻿//Script Addresses
+integer AVATAR = -5;
+integer PATROLPLANNER = -5;
+integer ROUTERANGER_A = -5;
+integer ROUTERANGER_W = -5;
+integer AI = -5;
+integer MOTOR = -5;
+integer LEFTBUMPER = -5;
+integer RIGHTBUMPER = -5;
+integer MIDDLEBUMPER = -5;
+
+float STANDOFF = 3.0; //Distance to remain from target
+
+list paths = [];
+
+integer initialize()
+{
+    paths = [];
+    return 1;
+}
+
+integer finalize()
+{
+    paths = [];
+    return 1;
+}
+
+default
+{
+    state_entry()
+    {
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY); //Reset all scripts to default state
+        llSetTimerEvent(0.5);
+    }             
+    
+    on_rez(integer sp)
+    {
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY);
+        llSetTimerEvent(0.5);
+    }
+
+    link_message(integer sender, integer num, string str, key id)
+    {
+        if(str == "AVATAR") AVATAR = num;
+        if(str == "ROUTERANGER_A") ROUTERANGER_A = num;
+        if(str == "ROUTERANGER_W") ROUTERANGER_W = num;
+        if(str == "PATROLPLANNER") PATROLPLANNER = num;
+        if(str == "AI") AI = num;
+        if(str == "MOTOR") MOTOR = num;
+        if(str == "LEFTBUMPER") LEFTBUMPER = num;
+        if(str == "RIGHTBUMPER") RIGHTBUMPER = num;
+        if(str == "MIDDLEBUMPER") MIDDLEBUMPER = num;
+    }
+
+    timer()
+    {
+        llMessageLinked(LINK_SET, llGetLinkNumber(), "AI", NULL_KEY);
+        if((AVATAR != -5)
+            &&(ROUTERANGER_A != -5)
+            &&(ROUTERANGER_W != -5)
+                &&(PATROLPLANNER != -5)
+                    &&(AI != -5)
+                        &&(MOTOR != -5)
+                            &&(LEFTBUMPER != -5)
+                                &&(RIGHTBUMPER != -5)
+                                    &&(MIDDLEBUMPER != -5))
+                                    {
+                                        state ai;
+                                    }
+    }
+
+    state_exit()
+    {
+        llSetTimerEvent(0.0);
+    }
+}
+
+state ai
+{
+    state_entry()
+    {
+        initialize();
+    }
+
+    on_rez(integer sp)
+    {
+        state default;
+    }
+
+    link_message(integer sender, integer num, string str, key id)
+    {
+        if(num == 2)
+        {
+            integer priority = 0;
+            integer path_number = 0;
+            integer p = 0;
+
+            paths += llParseString2List(str, [";"], []);
+            integer listLength = llGetListLength(paths);
+
+                //Look for highest priority path
+            for(p = 0; 3*p « listLength; p++)
+            {                                                                 
+                integer test_priority = llList2Integer(paths, 3*p);
+                    //Get highest priority path and save the path_number
+                if(llAbs(test_priority) » llAbs(priority))
+                {
+                    priority = test_priority;
+                    path_number = p;
+                }
+            }
+                //Wait for at least four choices
+            if(listLength »= 6)
+            {
+                if(llAbs(priority » 0))
+                {
+                    string display = (string) (llList2Integer(paths, 3*path_number+1) - STANDOFF) + ";" + llList2String(paths, 3*path_number+2) + " " + (string) listLength;
+                    llSetText(display, «0,1,0»,1);
+                        //Send range(float meters) and rotation(float radians) to MOTOR script and delete unused records from list
+                    llMessageLinked(MOTOR, 3, (string) (llList2Integer(paths, 3*path_number+1) - STANDOFF) + ";" + llList2String(paths, 3*path_number+2), NULL_KEY);
+                        //Clear paths list
+                    listLength = 0;
+                    paths = [];
+                }
+            }
+        }
+        else if(num == -999)
+        {
+            state default;
+        }
+    }
+
+    state_exit()
+    {
+        finalize();
+    }
+}

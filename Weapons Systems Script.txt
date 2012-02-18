@@ -1,0 +1,15 @@
+﻿default
+{
+    state_entry()
+    {
+        llSay(0, "Weapon Systems armed!");
+    }
+
+    link_message(integer sender_num, integer num, string str, key id) {
+        if(num == 11111) {
+            llPlaySound("fire",1.0);
+            llRezObject("Blaster Fire", llGetPos() + «1.0,0.0,0.0» * llGetRot(), «30.0,0.0,0.0» * llGetRot(), llGetRot(), 0);
+        }
+    }
+}
+asdf

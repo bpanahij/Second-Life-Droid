@@ -1,0 +1,197 @@
+﻿//integrated the changes from Objects » 020209Droid » PatrolPlanner
+
+list patrol_points = [];
+string patrol_display;
+integer current_waypoint;
+
+integer PATROL_PRIORITY = 5;
+float PATROL_TOLERANCE = 3.0;
+float URGENT_DISTANCE = 40.0; //meter range, not to exceed from waypoint
+
+key owner_key = NULL_KEY;
+
+integer listen_handle;
+
+integer hud_channel;
+ 
+integer initialize()
+{
+    hud_channel = llList2Integer(llGetObjectDetails(llGetLinkKey(0),[OBJECT_DESC]),0); //Get communication channel, created by HUD console
+    current_waypoint = 0;
+    patrol_points = [llGetRootPosition()];
+    llSetText("", «0,1,1»,1);
+    listen_handle = llListen(hud_channel+2, "DROID-HUD"+(string)hud_channel, NULL_KEY, "");
+    llSetTimerEvent(1.0);
+    return 1;
+}
+ 
+integer finalize()
+{
+    llSetTimerEvent(0.0);
+    llListenRemove(listen_handle);
+    llSetText("Patrol Unit Hibernating",«0,1,0»,1);
+    return 1;
+}
+
+integer updateDisplay()
+{
+    patrol_display = "";
+    integer p = 0;
+    integer listLength = llGetListLength(patrol_points);
+    for(p = 0; p « listLength; p = p + 1)
+    {
+        if(p == current_waypoint)
+        {
+            patrol_display += "[[" + llList2String(patrol_points, p) + "]]\n";
+        }
+        else
+        {
+            patrol_display += "" + llList2String(patrol_points, p) + "\n";
+        }
+    }
+    llSetText(patrol_display, «0,1,1»,1);
+    return 1;
+}
+ 
+integer AVATAR = -5;
+integer PATROLPLANNER = -5;
+integer ROUTERANGER_A = -5;
+integer ROUTERANGER_W = -5;
+integer AI = -5;
+integer MOTOR = -5;
+integer LEFTBUMPER = -5;
+integer RIGHTBUMPER = -5;
+integer MIDDLEBUMPER = -5;
+
+
+default
+{
+    state_entry()
+    {
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY);
+        llSetTimerEvent(0.5);
+    }             
+    
+    on_rez(integer sp)
+    {
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY);
+        llSetTimerEvent(0.5);
+    }
+
+    link_message(integer sender, integer num, string str, key id)
+    {
+        //llOwnerSay(str);
+        if(str == "AVATAR") AVATAR = num;
+        if(str == "ROUTERANGER_A") ROUTERANGER_A = num;
+        if(str == "ROUTERANGER_W") ROUTERANGER_W = num;
+        if(str == "PATROLPLANNER") PATROLPLANNER = num;
+        if(str == "AI") AI = num;
+        if(str == "MOTOR") MOTOR = num;
+        if(str == "LEFTBUMPER") LEFTBUMPER = num;
+        if(str == "RIGHTBUMPER") RIGHTBUMPER = num;
+        if(str == "MIDDLEBUMPER") MIDDLEBUMPER = num;
+    }
+
+
+    timer()
+    {
+        llMessageLinked(LINK_SET, llGetLinkNumber(), "PATROLPLANNER", NULL_KEY);
+        if((AVATAR != -5)
+            &&(ROUTERANGER_A != -5)
+            &&(ROUTERANGER_W != -5)
+                &&(PATROLPLANNER != -5)
+                    &&(AI != -5)
+                        &&(MOTOR != -5)
+                            &&(LEFTBUMPER != -5)
+                                &&(RIGHTBUMPER != -5)
+                                    &&(MIDDLEBUMPER != -5))
+                                    {
+                                        state patrolplanner;
+                                    }
+    }
+
+    state_exit()
+    {
+        llSetTimerEvent(0.0);
+    }
+}
+
+state patrolplanner
+{
+    state_entry()
+    {
+        initialize();
+    }
+    
+    on_rez(integer start_param)
+    {
+        state default;
+    }
+ 
+    listen(integer channel, string name, key id, string message)
+    {
+        integer listLength = llGetListLength(patrol_points);
+        integer found_identical_point = FALSE;
+        integer w = 0;
+        llOwnerSay(message);
+        for(w = 0; w « listLength; w++) //Start at next waypoint, skip the last waypoint
+        {
+            if((vector) message == llList2Vector(patrol_points, w)) found_identical_point = TRUE;
+        }
+        if(!found_identical_point)
+        {
+            patrol_points += (vector) message;
+            updateDisplay();
+        }
+    }
+
+    timer()
+    {
+            float range_to_other_waypoint = 0.0;
+            integer priority = 1;
+            integer listLength = llGetListLength(patrol_points);
+            vector droid_position = llGetRootPosition();
+            vector current_way_point_vector = llList2Vector(patrol_points, current_waypoint) - droid_position;
+            float range_to_current_waypoint = llFabs(llVecMag(current_way_point_vector));
+            float rot = llAtan2(current_way_point_vector.y, current_way_point_vector.x);
+
+            if(range_to_current_waypoint «= PATROL_TOLERANCE)
+            {     //Check whether the droid has reached a waypoint
+                current_waypoint++;
+                jump end;
+            }
+            if(current_waypoint »= listLength)
+            {     //Check for end of list, and return to first waypoint
+                current_waypoint  = 0;
+                jump end;
+            }
+                //If droid is too far off course, then tell AI to turn back
+            if(range_to_current_waypoint »= URGENT_DISTANCE)
+            {
+                priority = PATROL_PRIORITY + 9;
+            }
+            else
+            {
+                priority = PATROL_PRIORITY;
+            }
+                //Populate message string with current waypoint data
+            string waypoint_data = "0.0;0.0;" + (string) range_to_current_waypoint + ";" + (string) rot + ";" + (string) priority;
+            updateDisplay();
+                //Send waypoint data to ROUTERANGER_W
+            llMessageLinked(ROUTERANGER_W, 1, waypoint_data, NULL_KEY);
+            @end;
+    }
+
+    link_message(integer sender, integer num, string str, key id)
+    {
+        if(num ==-999)
+        {
+            state default;
+        }
+    }
+
+    state_exit()
+    {
+        finalize();
+    }
+}

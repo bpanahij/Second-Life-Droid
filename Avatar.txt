@@ -1,0 +1,311 @@
+﻿//AVATAR FLAGS 
+integer MASTER = 2; 
+integer FRIEND = 4; 
+integer COVERED = 8; 
+integer DEAD = 16; 
+integer DETECTED = 32; 
+integer ATTACKING = 64; 
+integer MASK = 255; 
+integer FOLLOW = 1; 
+integer BATTLE = 2; 
+integer SECURITY = 3; 
+
+//Script Addresses 
+integer AVATAR = -5; 
+integer PATROLPLANNER = -5; 
+integer ROUTERANGER_A = -5; 
+integer ROUTERANGER_W = -5; 
+integer AI = -5; 
+integer MOTOR = -5; 
+integer LEFTBUMPER = -5; 
+integer RIGHTBUMPER = -5; 
+integer MIDDLEBUMPER = -5; 
+  
+list avatars = [];  
+key owner_id; 
+float range = 96.0; 
+list display = []; 
+  
+integer listen_handle; 
+
+integer hud_channel; 
+  
+integer inititalize() 
+{ 
+    integer i = llList2Integer(llGetObjectDetails(llGetLinkKey(1),[OBJECT_DESC]),0); 
+    hud_channel = i; //Get communication channel, created by HUD console 
+    owner_id = llGetOwnerKey(llGetKey()); 
+    listen_handle = llListen(hud_channel, "DROID-HUD"+(string) hud_channel, NULL_KEY, ""); //Listen for HUD messages (new priorities)  
+    llSetText("DROID___"+(string) hud_channel ,«0,1,0»,1); 
+    llSensorRepeat("", NULL_KEY, AGENT, 96.0, PI, 1.0); 
+    //avatars = [owner_id, llKey2Name(owner_id), 0.0, 0.0, 0, 10, 0]; //add owner to avatar list 
+    return 1; 
+} 
+  
+integer finalize() 
+{ 
+    llSensorRemove(); 
+    llListenRemove(listen_handle); 
+    llSetText("DROID is hibernating", «0,1,0»,1); 
+    return 1; 
+} 
+
+integer clearAvatarData() 
+{ 
+    integer a = 0; 
+    integer listLength = llGetListLength(avatars); 
+    for(a = 0; 7*a « listLength; a++) 
+    { 
+        avatars = llListReplaceList(avatars, [0.0, 0.0, 0, 0], 7*a+2, 7*a+5); 
+    } 
+    return 1; 
+} 
+
+integer updateAvatars(list avatar_data) 
+{ 
+    key avatar_id = llList2String(avatar_data, 0); 
+    string avatar_name = llList2String(avatar_data, 1); 
+    float avatar_range = llList2Float(avatar_data, 2); 
+    float avatar_rot = llList2Float(avatar_data, 3); 
+    integer a = 0; 
+    integer listLength = llGetListLength(avatars); 
+    for(a = 0; 7*a « listLength; a++) 
+    { 
+        if(llList2Key(avatars, 7*a) == avatar_id) { 
+            avatars = llListReplaceList(avatars, [avatar_range , avatar_rot, (llList2Integer(avatars, 7*a+4) | DETECTED), 10], 7*a+2, 7*a+5); 
+            //Find out if avatar is dead by checking animations currently playing 
+            list animations = llGetAnimationList(avatar_id); 
+            integer listLength2 = llGetListLength(animations); 
+            integer an = 0; 
+            integer is_dead = FALSE; 
+            for(an = 0; an « listLength2; an++) 
+            { 
+                //Check for death animation RCS (Need to add dcs) 
+                if(("e2ad5fbd-932b-0337-9454-4f6112e09ad0" == llList2String(animations, an)) //rcs 
+                    || ("d24971b0-17bb-dba3-540f-20b1c257cee6" == llList2String(animations, an))) //dcs 
+                { 
+                    //add more combat systems here 
+                    is_dead = TRUE; 
+                    jump dead_animation_found; 
+                } 
+            } 
+            @dead_animation_found; 
+            if((!is_dead) && (llList2Integer(avatars, 7*a + 4) & DEAD)) 
+            { 
+                avatars = llListReplaceList(avatars, [(llList2Integer(avatars, 7*a+4) & ~DEAD)], 7*a+4, 7*a+4); //set to alive 
+                llOwnerSay(llList2String(avatars, 7*a) + " is alive again"); 
+            } 
+            else if((is_dead) && !(llList2Integer(avatars, 7*a + 4) & DEAD)) 
+            { 
+                avatars = llListReplaceList(avatars, [(llList2Integer(avatars, 7*a+4) | DEAD)], 7*a+4, 7*a+4); //set to dead 
+                llOwnerSay(llList2String(avatars, 7*a) + " is dead"); 
+            } 
+            jump foundAvatarInList; 
+        } 
+    } 
+    @foundAvatarInList; 
+    if(7*a »= listLength) //If list search exited at end of list, then add new avatar record 
+    { 
+        avatars += [avatar_id, avatar_name, avatar_range, avatar_rot, 0, 10, 0]; 
+    } 
+    return 1; 
+} 
+
+integer process() 
+{ 
+    integer time = 0; 
+    string display = ""; 
+    string parameters = ""; 
+    integer bit_field = 0; 
+    string avatar_data = ""; 
+    integer l = 0; 
+    integer listLength = llGetListLength(avatars); 
+    for(l = 0; 7*l « listLength; l++) 
+    { 
+        integer priority = llList2Integer(avatars, 7*l + 6); 
+        bit_field = llList2Integer(avatars, 7*l + 4); 
+        display += "(" + (string) l + ")" + llList2String(avatars, 7*l + 1) + "["; 
+        if(bit_field & DEAD) 
+        { 
+            display += "X"; 
+        } 
+        if(bit_field & COVERED) 
+        { 
+            display += "C"; 
+        } 
+        if(bit_field & DETECTED) 
+        { 
+            display += "!"; 
+        } 
+        else 
+        { 
+            display += "?"; 
+        } 
+        if(bit_field & ATTACKING) 
+        { 
+            display += "#"; 
+        } 
+        display += "]«-" + (string)llList2Integer(avatars, 7*l + 2) + "-»"; 
+        display += "[" + llList2String(avatars, 7*l + 6) + "]"; 
+        display += "(" + llList2String(avatars, 7*l + 5) + ")\n"; 
+        avatars = llListReplaceList(avatars, [priority], 7*l+6, 7*l+6); 
+        time = llList2Integer(avatars, 7*l+5); 
+        if(time » 0) 
+        { 
+            //Decrement time for each avatar 
+            avatars = llListReplaceList(avatars, [time - 1], 7*l+5, 7*l+5); 
+        } 
+        else 
+        { 
+            //If time is zero then unset DETECTED flag 
+            avatars = llListReplaceList(avatars, [(llList2Integer(avatars, 7*l+4) & ~DETECTED)], 7*l+4, 7*l+4); 
+        } 
+        if(llAbs(priority) » 0) 
+        { 
+            avatar_data = "0.0;0.0;" 
+                + llList2String(avatars, 7*l+2) //Range 
+                + ";" + llList2String(avatars, 7*l+3) //Rot 
+                + ";" + (string) priority; // positive priorities are good guys, negative priorities are bad guys 
+            //Send avatar data to ROUTERANGER_A 
+            llMessageLinked(ROUTERANGER_A, 1, avatar_data, NULL_KEY); 
+        } 
+        llRegionSay(hud_channel, llList2String(avatars, 7*l + 1)); //Send HUD Console the new avatar 
+    } 
+    llSetText(display, «0,1,0»,1); 
+    return 1; 
+}
+
+default 
+{ 
+    state_entry() 
+    { 
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY); 
+        llSetTimerEvent(0.5); 
+    }              
+     
+    on_rez(integer sp) 
+    { 
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY); 
+        llSetTimerEvent(0.5); 
+    } 
+
+
+    link_message(integer sender, integer num, string str, key id) 
+    { 
+        //llOwnerSay(str); 
+        if(str == "AVATAR") AVATAR = num; 
+        if(str == "ROUTERANGER_A") ROUTERANGER_A = num; 
+        if(str == "ROUTERANGER_W") ROUTERANGER_W = num; 
+        if(str == "PATROLPLANNER") PATROLPLANNER = num; 
+        if(str == "AI") AI = num; 
+        if(str == "MOTOR") MOTOR = num; 
+        if(str == "LEFTBUMPER") LEFTBUMPER = num; 
+        if(str == "RIGHTBUMPER") RIGHTBUMPER = num; 
+        if(str == "MIDDLEBUMPER") MIDDLEBUMPER = num; 
+    } 
+
+    timer() 
+    { 
+        llMessageLinked(LINK_SET, llGetLinkNumber(), "AVATAR", NULL_KEY); 
+        if((AVATAR != -5) 
+            &&(ROUTERANGER_A != -5) 
+            &&(ROUTERANGER_W != -5) 
+                &&(PATROLPLANNER != -5) 
+                    &&(AI != -5) 
+                        &&(MOTOR != -5) 
+                            &&(LEFTBUMPER != -5) 
+                                &&(RIGHTBUMPER != -5) 
+                                    &&(MIDDLEBUMPER != -5)) 
+                                    { 
+                                        state avatar; 
+                                    } 
+
+    } 
+  
+    state_exit() 
+    { 
+        llSetTimerEvent(0.0); 
+    } 
+} 
+
+state avatar 
+{ 
+    state_entry() 
+    { 
+        inititalize(); 
+    } 
+     
+    on_rez(integer sp) 
+    { 
+        state default; 
+    } 
+     
+    link_message(integer sender, integer num, string str, key id) 
+    { 
+        if(num == -999) 
+        { 
+            state default; 
+        } 
+    } 
+
+    listen(integer channel, string name, key id, string message) 
+    { 
+        list avatar_data = llParseString2List(message, [";"], []); 
+        string avatar_name = llList2String(avatar_data, 1); 
+        integer priority = llList2Integer(avatar_data, 0); 
+        integer l = 0; 
+        integer listLength = llGetListLength(avatars); 
+        for(l = 0; 7*l « listLength; l++) 
+        { 
+            if(avatar_name == llList2String(avatars, 7*l + 1)) 
+            { 
+                avatars = llListReplaceList(avatars, [priority], 7*l+6, 7*l+6); 
+            } 
+        } 
+    } 
+
+    sensor(integer num_detected) 
+    { 
+        integer nd = 0; 
+        vector droid_position = llGetRootPosition(); 
+        for(nd = 0; nd « num_detected; nd++) 
+        { 
+            list avatar_data = []; 
+            avatar_data += llDetectedKey(nd); 
+            avatar_data += llDetectedName(nd); 
+            vector rel_avatar_position = llDetectedPos(nd) - droid_position; 
+            avatar_data += llFabs(llVecMag(rel_avatar_position)); 
+            avatar_data += llAtan2(rel_avatar_position.y, rel_avatar_position.x); 
+            updateAvatars(avatar_data); 
+        } 
+        process(); 
+    } 
+
+    no_sensor() 
+    { 
+        clearAvatarData(); 
+    } 
+
+    collision(integer total_number) 
+    { 
+        integer c = 0; 
+        for(c = 0; c « total_number; c++) 
+        { 
+            integer l = 0; 
+            integer listLength = llGetListLength(avatars); 
+            for(l = 0; 7*l « listLength; l++) 
+            { 
+                if((llList2Key(avatars, 7*l) == llDetectedKey(c)) && !(llList2Integer(avatars, 7*l) & (FRIEND | FOLLOW))) 
+                { 
+                    avatars = llListReplaceList(avatars, [(llList2Integer(avatars, 7*l+6) - 1)], 7*l+6, 7*l+6); //Move priority to enemy (negative) side by subtraction 
+                } 
+            } 
+            //Implement RCS here 
+        } 
+    } 
+  
+    state_exit() 
+    { 
+        finalize(); 
+    } 
+}

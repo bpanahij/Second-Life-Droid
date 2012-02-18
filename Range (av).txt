@@ -1,0 +1,300 @@
+﻿integer AVATAR = -5; 
+integer PATROLPLANNER = -5; 
+integer ROUTERANGER_A = -5; 
+integer ROUTERANGER_W = -5; 
+integer AI = -5; 
+integer MOTOR = -5; 
+integer LEFTBUMPER = -5; 
+integer RIGHTBUMPER = -5; 
+integer MIDDLEBUMPER = -5; 
+  
+float range; 
+float target_range; 
+float radians_to_target; 
+rotation rotation_to_target; 
+vector target_position; 
+float origin_range; 
+float radians_to_origin; 
+rotation rotation_to_origin; 
+vector origin_position; 
+key object_id; 
+list objects_points = []; 
+float adjust_path_rotation = 10.0; 
+  
+integer initialize() 
+{ 
+    llSensorRepeat("", NULL_KEY, PASSIVE, 20.0, PI, 1.0); //1.0 seconds at 20.0 meters for max speed of 10.0 meters/second 
+    return 1; 
+} 
+  
+integer finalize() 
+{ 
+    llSensorRemove(); 
+    return 1; 
+}
+
+integer clearObjectListFlags() 
+{ 
+    integer o = 0; 
+    integer listLength = llGetListLength(objects_points); 
+    for(o = 0; 10*o « listLength; o++) 
+    { 
+        objects_points = llListReplaceList(objects_points, [0], 10*o+9, 10*o+9); //Set all flags to undetected 
+    } 
+    return 1; 
+} 
+
+integer cleanObjectListArtifacts() 
+{ 
+    integer o = 0; 
+    integer listLength = llGetListLength(objects_points); 
+    for(o = 0; 10*o « listLength; o++) 
+    { 
+        if(!llList2Integer(objects_points, 10*o+9)) 
+        { 
+            objects_points = llDeleteSubList(objects_points, 10*o, 10*o+9); //Remove Record 
+        } 
+    } 
+    return 1; 
+} 
+
+integer mapObjectToList(key detectedKey) 
+{ 
+    integer found_object_in_list = FALSE; 
+    integer o = 0; 
+    integer listLength = llGetListLength(objects_points); 
+    for(o = 0; 10*o « listLength; o++) 
+    { 
+        if(detectedKey == llList2Key(objects_points, 10*o)) 
+        { 
+            found_object_in_list = TRUE; 
+        } 
+    } 
+    if(!found_object_in_list) 
+    { 
+        list params = llGetObjectDetails(detectedKey, [OBJECT_NAME, OBJECT_POS, OBJECT_ROT]); 
+        vector obstacle_position = llList2Vector(params, 1); 
+        rotation obstacle_rotation = llList2Rot(params, 2); 
+        list bounding_box = llGetBoundingBox(detectedKey); //Get the objects size (bounding box) 
+        vector obstacle_min_corner1 = llList2Vector(bounding_box, 0);// - «2.0,2.0,2.0»; //Min corner 
+        vector obstacle_max_corner1 = llList2Vector(bounding_box, 1);// + «2.0,2.0,2.0»; //Max corner 
+        vector obstacle_offset = (obstacle_max_corner1 + obstacle_min_corner1) / 2.0; //Calculate the offset from the targets root prim center 
+        obstacle_min_corner1 = obstacle_min_corner1 - obstacle_offset; 
+        obstacle_max_corner1 = obstacle_max_corner1 - obstacle_offset; 
+        obstacle_position = obstacle_position + (obstacle_offset * obstacle_rotation); //Object modelling good to here (verified 7/23/2008) 
+            //Object modeling good to here (verified 7/23/2008) 
+        vector global_rotated_obstacle_max_corner1 = obstacle_position + (obstacle_max_corner1 * obstacle_rotation); 
+        vector global_rotated_obstacle_min_corner1 = obstacle_position + (obstacle_min_corner1 * obstacle_rotation); 
+        vector global_rotated_obstacle_max_corner2 = obstacle_position + (obstacle_max_corner1 * (llEuler2Rot(«0.0,0.0,PI») * obstacle_rotation)); 
+        vector global_rotated_obstacle_min_corner2 = obstacle_position + (obstacle_min_corner1 * (llEuler2Rot(«0.0,0.0,PI») * obstacle_rotation)); 
+        vector global_rotated_obstacle_max_corner3 = obstacle_position + (obstacle_max_corner1 * (llEuler2Rot(«PI,0.0,0.0») * obstacle_rotation)); 
+        vector global_rotated_obstacle_min_corner3 = obstacle_position + (obstacle_min_corner1 * (llEuler2Rot(«PI,0.0,0.0») * obstacle_rotation)); 
+        vector global_rotated_obstacle_max_corner4 = obstacle_position + (obstacle_max_corner1 * (llEuler2Rot(«0.0,PI,0.0») * obstacle_rotation)); 
+        vector global_rotated_obstacle_min_corner4 = obstacle_position + (obstacle_min_corner1 * (llEuler2Rot(«0.0,PI,0.0») * obstacle_rotation)); 
+        objects_points += [detectedKey, 
+            global_rotated_obstacle_min_corner1, 
+            global_rotated_obstacle_max_corner1, 
+            global_rotated_obstacle_min_corner2, 
+            global_rotated_obstacle_max_corner2, 
+            global_rotated_obstacle_min_corner3, 
+            global_rotated_obstacle_max_corner3, 
+            global_rotated_obstacle_min_corner4, 
+            global_rotated_obstacle_max_corner4, 1]; 
+    } 
+    return 1; 
+} 
+
+float findRange(vector origin, rotation rotation_to_destination, list points) 
+{ 
+    float temp_range = 150.0; //Long distance to compensate for arc of sensor 
+    float distance = 150.0; 
+    vector edge_point1 = ZERO_VECTOR; 
+    vector edge_point2 = ZERO_VECTOR; 
+    float angle_to_point1 = 0.0; 
+    float angle_to_point2 = 0.0; 
+    float incidentrot = 0.0; 
+    float ratio = 0.0; 
+    float minus_dist = 0.0; 
+    float center_angle = 0.0; 
+        //12 EDGE Point Pairs: 12 edges of a box 
+    list edges = [llList2Vector(points, 1), llList2Vector(points, 8), //global_rotated_obstacle_min_corner1, global_rotated_obstacle_max_corner4, 
+        llList2Vector(points, 1), llList2Vector(points, 6), //global_rotated_obstacle_min_corner1, global_rotated_obstacle_max_corner3, 
+        llList2Vector(points, 1), llList2Vector(points, 4), //global_rotated_obstacle_min_corner1, global_rotated_obstacle_max_corner2, 
+        llList2Vector(points, 2), llList2Vector(points, 7), //global_rotated_obstacle_max_corner1, global_rotated_obstacle_min_corner4, 
+        llList2Vector(points, 2), llList2Vector(points, 5), //global_rotated_obstacle_max_corner1, global_rotated_obstacle_min_corner3, 
+        llList2Vector(points, 2), llList2Vector(points, 3), //global_rotated_obstacle_max_corner1, global_rotated_obstacle_min_corner2, 
+        llList2Vector(points, 3), llList2Vector(points, 6), //global_rotated_obstacle_min_corner2, global_rotated_obstacle_max_corner3, 
+        llList2Vector(points, 3), llList2Vector(points, 8), //global_rotated_obstacle_min_corner2, global_rotated_obstacle_max_corner4, 
+        llList2Vector(points, 4), llList2Vector(points, 5), //global_rotated_obstacle_max_corner2, global_rotated_obstacle_min_corner3, 
+        llList2Vector(points, 4), llList2Vector(points, 7), //global_rotated_obstacle_max_corner2, global_rotated_obstacle_min_corner4, 
+        llList2Vector(points, 5), llList2Vector(points, 8), //global_rotated_obstacle_min_corner3, global_rotated_obstacle_max_corner4, 
+        llList2Vector(points, 6), llList2Vector(points, 7)]; //global_rotated_obstacle_max_corner3, global_rotated_obstacle_min_corner4 
+
+    integer e = 0; 
+    integer listLength = llGetListLength(edges); 
+    for(e = 0; 2*e « listLength; e++) 
+    { 
+        edge_point1 = (llList2Vector(edges, 2*e) - origin) / rotation_to_destination; 
+        edge_point2 = (llList2Vector(edges, 2*e + 1) - origin) / rotation_to_destination; 
+        angle_to_point1 = RAD_TO_DEG * llAtan2(edge_point1.y, edge_point1.x); 
+        angle_to_point2 = RAD_TO_DEG * llAtan2(edge_point2.y, edge_point2.x); 
+        if((angle_to_point2 - angle_to_point1) » 180.0) //Handle when prim is rotated by ~180 degrees from orthogonal 
+        { 
+            vector temp_point = edge_point2; 
+            edge_point2 = edge_point1; 
+            edge_point1 = temp_point; 
+            float temp_angle_to_point = angle_to_point2; 
+            angle_to_point2 = angle_to_point1; 
+            angle_to_point1 = temp_angle_to_point; 
+        } 
+        if((0.0 » angle_to_point1) && (0.0 « angle_to_point2)) 
+        { 
+            incidentrot = llAtan2((edge_point2.y - edge_point1.y), (edge_point2.x - edge_point1.x)); 
+            ratio = 0.5 * (edge_point2.y + edge_point1.y)/(edge_point2.y - edge_point1.y); 
+            minus_dist = edge_point2.y / llTan(incidentrot); 
+            distance = edge_point2.x - minus_dist; 
+            if(distance « temp_range) temp_range = distance; 
+        } 
+    } 
+    return temp_range; 
+} 
+
+default 
+{ 
+    state_entry() 
+    { 
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY); 
+        llSetTimerEvent(0.5); 
+    }              
+     
+    on_rez(integer sp) 
+    { 
+        llMessageLinked(LINK_ALL_OTHERS, -999, "", NULL_KEY); 
+        llSetTimerEvent(0.5); 
+    }
+
+    link_message(integer sender, integer num, string str, key id) 
+    { 
+        if(str == "AVATAR") AVATAR = num; 
+        if(str == "ROUTERANGER_A") ROUTERANGER_A = num; 
+        if(str == "ROUTERANGER_W") ROUTERANGER_W = num; 
+        if(str == "PATROLPLANNER") PATROLPLANNER = num; 
+        if(str == "AI") AI = num; 
+        if(str == "MOTOR") MOTOR = num; 
+        if(str == "LEFTBUMPER") LEFTBUMPER = num; 
+        if(str == "RIGHTBUMPER") RIGHTBUMPER = num; 
+        if(str == "MIDDLEBUMPER") MIDDLEBUMPER = num; 
+    } 
+
+    timer() 
+    { 
+        llMessageLinked(LINK_SET, llGetLinkNumber(), "ROUTERANGER_A", NULL_KEY); 
+        if((AVATAR != -5) 
+            &&(ROUTERANGER_A != -5) 
+            &&(ROUTERANGER_W != -5) 
+                &&(PATROLPLANNER != -5) 
+                    &&(AI != -5) 
+                        &&(MOTOR != -5) 
+                            &&(LEFTBUMPER != -5) 
+                                &&(RIGHTBUMPER != -5) 
+                                    &&(MIDDLEBUMPER != -5)) 
+                                    { 
+                                        state routeranger; 
+                                    } 
+    } 
+  
+    state_exit() 
+    { 
+        llSetTimerEvent(0.0); 
+    } 
+} 
+
+state routeranger 
+{ 
+    state_entry() 
+    { 
+        initialize(); 
+    } 
+     
+    on_rez(integer sp) 
+    { 
+        state default; 
+    } 
+
+    link_message(integer sender, integer num, string str, key id) 
+    { 
+            //Wait for long range directional coordinates to compare against objects 
+        if(num == 1) 
+        { 
+            object_id = id; 
+            list parameters = llParseString2List(str, [";"], []); 
+            origin_range = llList2Float(parameters, 0); 
+            radians_to_origin = llList2Float(parameters, 1); 
+            rotation_to_origin = llEuler2Rot(«0.0,0.0,radians_to_origin»); 
+            origin_position = «origin_range,0.0,0.0» * rotation_to_origin + llGetRootPosition(); 
+            target_range = llList2Float(parameters, 2); 
+            radians_to_target = llList2Float(parameters, 3); 
+            rotation_to_target = llEuler2Rot(«0.0,0.0,radians_to_target»); 
+            target_position = «target_range,0.0,0.0» * rotation_to_target + llGetRootPosition(); 
+                //Parameter 4 is the priority of the request 
+            vector target_vector = target_position - origin_position; 
+            rotation target_vector_rotation = llEuler2Rot(«0.0,0.0,llAtan2(target_vector.y, target_vector.x)»); 
+            range = target_range; 
+            integer obstructed = FALSE; 
+            float this_object_range = 0.0; 
+            integer o = 0; 
+            integer listLength = llGetListLength(objects_points); 
+            for(o = 0; 10*o « listLength; o++) 
+            { 
+                    //Run through object list and find open route to target 
+                this_object_range = findRange(origin_position, target_vector_rotation, llList2List(objects_points, 10*o, 10*o + 9)); 
+                if((this_object_range » 0) && (this_object_range « range)) 
+                { 
+                    range = this_object_range; 
+                    obstructed = TRUE; 
+                } 
+            }  
+            if(!obstructed) 
+            { 
+                string data_string = llList2String(parameters, 4) + ";" + (string) range + ";" + (string) radians_to_target; 
+                    //Send range, rot, priority to AI Module 
+                llMessageLinked(AI, 2, data_string, NULL_KEY); 
+            } 
+            else if(llList2Integer(parameters, 4) » 9) 
+            { 
+                    //If obstructed rotate path and look for a 10 meter long alternate path 
+                parameters = llListReplaceList(parameters, [10.0, radians_to_target + adjust_path_rotation * DEG_TO_RAD], 2, 3); 
+                    //Send data back to self 
+                llMessageLinked(ROUTERANGER_A, 1, llDumpList2String(parameters, ";"), NULL_KEY); 
+            } 
+        } 
+        else if(num == -999) 
+        { 
+            state default; 
+        } 
+    } 
+
+    sensor(integer total_number) 
+    { 
+        integer s = 0; 
+        for(s = 0; s « total_number; s++) //Map new objects and remove old ones 
+        { 
+            clearObjectListFlags(); 
+            mapObjectToList(llDetectedKey(s)); 
+            cleanObjectListArtifacts(); 
+        } 
+    } 
+
+    no_sensor() 
+    { 
+            //Clear all flags 
+        clearObjectListFlags(); 
+            //Clear entire list 
+        cleanObjectListArtifacts(); 
+    } 
+  
+    state_exit() 
+    { 
+        finalize(); 
+    } 
+}
