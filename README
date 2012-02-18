@@ -1,0 +1,6 @@
+Second Life Droid
+
+This set of scripts is designed to control a fully autonomous droid in Second Life's LSL.
+
+The script creates a 2D model of prims around the droid, a list of nearby avatars, and an optional patrol path.
+
